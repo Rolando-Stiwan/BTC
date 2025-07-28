@@ -27,3 +27,7 @@ def predict_price(data: InputData):
         "current_price": round(data.current_price, 2),
         "signal": signal
     }
+
+@app.get("/healthz")
+def health_check():
+    return {"status": "ok"}
