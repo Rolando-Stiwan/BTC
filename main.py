@@ -6,7 +6,7 @@ import tensorflow as tf
 app = FastAPI()
 
 # Cargar modelo entrenado
-model = tf.keras.models.load_model("modelo_btc_lstm.h5")
+model = tf.keras.models.load_model("modelo_btc_lstm.h5", compile=False)
 
 # Input esperado: features + precio actual
 class InputData(BaseModel):
