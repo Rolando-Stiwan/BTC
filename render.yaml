@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: btc-lstm-api
+    env: docker
+    repo: https://github.com/Rolando-Stiwan/BTC
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    plan: free
