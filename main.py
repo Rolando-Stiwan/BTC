@@ -14,16 +14,22 @@ scaler = joblib.load("scaler.pkl")
 
 @app.get("/predict")
 def predict():
-    # Descargar datos de los últimos 30 días
-    btc = yf.download("BTC-USD", period="30d", interval="1d")
-    sp500 = yf.download("^GSPC", period="30d", interval="1d")
-    nasdaq = yf.download("^IXIC", period="30d", interval="1d")
+    # Descargar datos de los últimos 40 días
+    btc = yf.download("BTC-USD", period="40d", interval="1d")
+    sp500 = yf.download("^GSPC", period="40d", interval="1d")
+    nasdaq = yf.download("^IXIC", period="40d", interval="1d")
 
     if btc.empty or sp500.empty or nasdaq.empty:
         return {"error": "Error al obtener datos del mercado."}
 
-    # Crear DataFrame conjunto
-    df = pd.DataFrame(index=btc.index)
+    # Sincronizar fechas entre activos (quedarnos solo con fechas comunes)
+    common_dates = btc.index.intersection(sp500.index).intersection(nasdaq.index)
+    btc = btc.loc[common_dates]
+    sp500 = sp500.loc[common_dates]
+    nasdaq = nasdaq.loc[common_dates]
+
+    # Crear DataFrame conjunto con fechas comunes
+    df = pd.DataFrame(index=common_dates)
     df["btc_close"] = btc["Close"]
     df["btc_volume"] = btc["Volume"]
     df["sp500_close"] = sp500["Close"]
@@ -44,22 +50,26 @@ def predict():
         "diff_sma5", "return_sp500", "return_Nasdaq"
     ]].dropna()
 
+    # Verificar que haya suficientes datos (al menos 10 para la ventana)
     if df_feat.shape[0] < 10:
         return {"error": "No hay suficientes datos válidos para generar una predicción."}
 
     # Escalar usando scaler entrenado
     df_scaled = scaler.transform(df_feat.tail(10))
 
-    # Formato para el modelo LSTM
+    # Preparar entrada para el modelo LSTM
     input_array = df_scaled.reshape(1, 10, 6)
+
+    # Predicción
     predicted_price = model.predict(input_array)[0][0]
     current_price = df["btc_close"].iloc[-1]
 
+    # Señal: comparar retornos logarítmicos para decidir compra o venta
     signal = "BUY" if predicted_price > current_price else "SELL"
 
     return {
-        "predicted_price": round(float(predicted_price), 2),
-        "current_price": round(float(current_price), 2),
+        "predicted_price": round(float(predicted_price), 6),
+        "current_price": round(float(current_price), 6),
         "signal": signal
     }
 
