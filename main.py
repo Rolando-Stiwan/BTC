@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -8,12 +8,11 @@ import joblib
 
 app = FastAPI()
 
-# Cargar modelo y scaler
 model = load_model("modelo_btc_lstm.h5", compile=False)
 scaler = joblib.load("scaler.pkl")
 
 @app.get("/predict")
-def predict():
+def predict(days: int = Query(1, ge=1, le=7)):
     # Descargar datos de los últimos 40 días
     btc = yf.download("BTC-USD", period="40d", interval="1d")
     sp500 = yf.download("^GSPC", period="40d", interval="1d")
@@ -54,25 +53,46 @@ def predict():
     if df_feat.shape[0] < 10:
         return {"error": "No hay suficientes datos válidos para generar una predicción."}
 
-    # Escalar usando scaler entrenado
-    df_scaled = scaler.transform(df_feat.tail(10))
+    # Preparar la secuencia inicial para predecir
+    input_seq = df_feat.tail(10).copy().values
+    input_scaled = scaler.transform(input_seq)
+    input_scaled = input_scaled.reshape(1, 10, 6)
 
-    # Preparar entrada para el modelo LSTM
-    input_array = df_scaled.reshape(1, 10, 6)
-
-    # Predicción
-    predicted_price = model.predict(input_array)[0][0]
     current_price = df["btc_close"].iloc[-1]
+    last_features = df_feat.tail(1).values[0]
 
-    # Señal: comparar retornos logarítmicos para decidir compra o venta
-    signal = "BUY" if predicted_price > current_price else "SELL"
+    signals = []
+
+    for _ in range(days):
+        # Predecir retorno logarítmico escalado
+        pred_scaled = model.predict(input_scaled)[0][0]
+
+        # Desescalar la predicción para obtener retorno real
+        dummy_input = np.zeros((1, 6))
+        dummy_input[0, 0] = pred_scaled
+        pred_return = scaler.inverse_transform(dummy_input)[0, 0]
+
+        # Convertir retorno a precio predicho real
+        pred_price = current_price * np.exp(pred_return)
+
+        # Señal comparando con el precio actual (o predicho del paso anterior)
+        signal = "BUY" if pred_price > current_price else "SELL"
+        signals.append(signal)
+
+        # Actualizar para la siguiente iteración
+        current_price = pred_price
+
+        # Crear nueva fila de features para el próximo input_scaled
+        new_features = last_features.copy()
+        new_features[0] = pred_return  # return_btc_price es la primera feature
+        # Aquí podrías actualizar otras features si tienes cómo, pero las mantenemos iguales
+        last_features = new_features
+
+        # Transformar y actualizar input_scaled
+        new_scaled = scaler.transform([new_features])[0]
+        input_scaled = np.append(input_scaled[:, 1:, :], [[new_scaled]], axis=1)
 
     return {
-        "predicted_price": round(float(predicted_price), 6),
-        "current_price": round(float(current_price), 6),
-        "signal": signal
+        "current_price": round(float(df["btc_close"].iloc[-1]), 2),
+        "signals": signals
     }
-
-@app.get("/healthz")
-def health_check():
-    return {"status": "ok"}
